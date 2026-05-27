@@ -1,0 +1,62 @@
+name: Crawl L2 Notices
+
+on:
+  schedule:
+    # 매주 월요일 오전 9시 (KST = UTC+9 → UTC 00:00)
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: '기존 ID 무시하고 전체 재수집'
+        required: false
+        default: 'false'
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-playwright
+
+      - name: Install Python dependencies
+        run: |
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Reset crawled IDs (force_all)
+        if: ${{ github.event.inputs.force_all == 'true' }}
+        run: rm -f notices/crawled_ids.json
+
+      - name: Run crawler
+        run: python scripts/crawler.py
+
+      - name: Generate index.json
+        run: python scripts/generate_index.py
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add notices/
+          if git diff --staged --quiet; then
+            echo "새 공지 없음 — 커밋 생략"
+          else
+            NOTICE_COUNT=$(python -c "import json; d=json.load(open('notices/index.json')); print(d['total'])")
+            git commit -m "chore: update notices (total: ${NOTICE_COUNT}건) [$(date -u '+%Y-%m-%d')]"
+            git push
+          fi
