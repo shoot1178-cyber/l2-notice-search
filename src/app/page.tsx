@@ -7,6 +7,7 @@ import SearchBar from '@/components/SearchBar';
 import ServerFilter from '@/components/ServerFilter';
 import NoticeList from '@/components/NoticeList';
 import NoticeModal from '@/components/NoticeModal';
+import AISearch from '@/components/AISearch';
 
 export default function Home() {
   const [data, setData] = useState<NoticesIndex | null>(null);
@@ -103,6 +104,9 @@ export default function Home() {
           filteredCount={filtered.length}
           totalCount={data?.total ?? 0}
         />
+
+        {/* AI Search */}
+        <AISearch />
 
         {/* Filters row */}
         <div className="flex flex-wrap items-center justify-between gap-4">
