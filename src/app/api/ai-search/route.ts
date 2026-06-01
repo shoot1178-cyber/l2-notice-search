@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { fetchNoticesIndex } from '@/lib/github';
 import { Notice } from '@/types';
 
@@ -79,10 +79,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return new Response(
-      JSON.stringify({ error: 'ANTHROPIC_API_KEY가 서버에 설정되지 않았습니다.' }),
+      JSON.stringify({ error: 'GEMINI_API_KEY가 서버에 설정되지 않았습니다.' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -103,39 +103,30 @@ export async function POST(req: NextRequest) {
     .map((n, i) => `[${i + 1}] 제목: ${n.title} | 날짜: ${n.date} | 서버: ${n.server}\n${n.preview}`)
     .join('\n\n');
 
-  const client = new Anthropic({ apiKey });
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-1.5-flash',
+    systemInstruction:
+      '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
+      '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
+      '규칙:\n' +
+      '- 관련 공지가 있으면 핵심 내용·날짜·서버를 포함해 답변\n' +
+      '- 여러 공지가 관련 있으면 최신순으로 3~5개 요약\n' +
+      '- 관련 공지가 없으면 솔직하게 안내\n' +
+      '- 공지 원문을 그대로 나열하지 말고 질문에 맞게 요약',
+  });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const response = await client.messages.create({
-          model: 'claude-opus-4-7',
-          max_tokens: 2048,
-          stream: true,
-          system:
-            '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
-            '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
-            '규칙:\n' +
-            '- 관련 공지가 있으면 핵심 내용·날짜·서버를 포함해 답변\n' +
-            '- 여러 공지가 관련 있으면 최신순으로 3~5개 요약\n' +
-            '- 관련 공지가 없으면 솔직하게 안내\n' +
-            '- 공지 원문을 그대로 나열하지 말고 질문에 맞게 요약',
-          messages: [
-            {
-              role: 'user',
-              content: `공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`,
-            },
-          ],
-        });
+        const result = await model.generateContentStream(
+          `공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`
+        );
 
-        for await (const event of response) {
-          if (
-            event.type === 'content_block_delta' &&
-            event.delta.type === 'text_delta'
-          ) {
-            controller.enqueue(encoder.encode(event.delta.text));
-          }
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          if (text) controller.enqueue(encoder.encode(text));
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '알 수 없는 오류';
