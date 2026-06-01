@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash-latest',
+    model: 'gemini-1.5-flash',
     systemInstruction:
       '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
       '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
       '- 여러 공지가 관련 있으면 최신순으로 3~5개 요약\n' +
       '- 관련 공지가 없으면 솔직하게 안내\n' +
       '- 공지 원문을 그대로 나열하지 말고 질문에 맞게 요약',
-  });
+  }, { apiVersion: 'v1' });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
