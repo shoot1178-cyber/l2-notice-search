@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash',
     systemInstruction:
       '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
       '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
