@@ -104,24 +104,23 @@ export async function POST(req: NextRequest) {
     .join('\n\n');
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
-    systemInstruction:
-      '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
-      '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
-      '규칙:\n' +
-      '- 관련 공지가 있으면 핵심 내용·날짜·서버를 포함해 답변\n' +
-      '- 여러 공지가 관련 있으면 최신순으로 3~5개 요약\n' +
-      '- 관련 공지가 없으면 솔직하게 안내\n' +
-      '- 공지 원문을 그대로 나열하지 말고 질문에 맞게 요약',
-  }, { apiVersion: 'v1' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+  const systemPrompt =
+    '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
+    '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
+    '규칙:\n' +
+    '- 관련 공지가 있으면 핵심 내용·날짜·서버를 포함해 답변\n' +
+    '- 여러 공지가 관련 있으면 최신순으로 3~5개 요약\n' +
+    '- 관련 공지가 없으면 솔직하게 안내\n' +
+    '- 공지 원문을 그대로 나열하지 말고 질문에 맞게 요약';
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
         const result = await model.generateContentStream(
-          `공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`
+          `${systemPrompt}\n\n공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`
         );
 
         for await (const chunk of result.stream) {
