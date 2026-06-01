@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { fetchNoticesIndex } from '@/lib/github';
 import { Notice } from '@/types';
 
@@ -103,9 +102,6 @@ export async function POST(req: NextRequest) {
     .map((n, i) => `[${i + 1}] 제목: ${n.title} | 날짜: ${n.date} | 서버: ${n.server}\n${n.preview}`)
     .join('\n\n');
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
   const systemPrompt =
     '당신은 리니지2 게임 공지사항 검색 도우미입니다. ' +
     '제공된 공지 목록에서 사용자 질문과 관련된 내용을 찾아 한국어로 간결하게 요약합니다.\n\n' +
@@ -115,31 +111,40 @@ export async function POST(req: NextRequest) {
     '- 관련 공지가 없으면 솔직하게 안내\n' +
     '- 공지 원문을 그대로 나열하지 말고 질문에 맞게 요약';
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        const result = await model.generateContentStream(
-          `${systemPrompt}\n\n공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`
-        );
+  const userMessage = `${systemPrompt}\n\n공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`;
 
-        for await (const chunk of result.stream) {
-          const text = chunk.text();
-          if (text) controller.enqueue(encoder.encode(text));
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : '알 수 없는 오류';
-        controller.enqueue(encoder.encode(`오류가 발생했습니다: ${msg}`));
-      } finally {
-        controller.close();
-      }
-    },
-  });
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`;
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
+  try {
+    const geminiRes = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+      }),
+    });
+
+    if (!geminiRes.ok) {
+      const errData = await geminiRes.json() as { error?: { message?: string } };
+      return new Response(
+        JSON.stringify({ error: `Gemini API 오류: ${errData?.error?.message ?? geminiRes.statusText}` }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const data = await geminiRes.json() as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '응답을 받을 수 없습니다.';
+
+    return new Response(JSON.stringify({ answer }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+    return new Response(
+      JSON.stringify({ error: `오류가 발생했습니다: ${msg}` }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
 }

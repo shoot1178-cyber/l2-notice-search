@@ -39,16 +39,8 @@ export default function AISearch() {
         return;
       }
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let text = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
-        setAnswer(text);
-      }
+      const data = await res.json() as { answer?: string };
+      setAnswer(data.answer ?? '응답을 받을 수 없습니다.');
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         setAnswer('요청 중 오류가 발생했습니다.');
@@ -117,9 +109,6 @@ export default function AISearch() {
                         leading-relaxed whitespace-pre-wrap min-h-[60px]">
           {answer || (
             <span className="text-gray-500 animate-pulse">AI가 공지를 분석하고 있습니다…</span>
-          )}
-          {loading && answer && (
-            <span className="inline-block w-1.5 h-4 bg-amber-500 ml-0.5 animate-pulse align-middle" />
           )}
         </div>
       )}
