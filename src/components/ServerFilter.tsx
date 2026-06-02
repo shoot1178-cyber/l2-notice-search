@@ -5,9 +5,8 @@ import { ServerType } from '@/types';
 const SERVERS: { label: string; value: ServerType }[] = [
   { label: '전체', value: '전체' },
   { label: '본서버', value: '본서버' },
-  { label: '각성서버', value: '각성서버' },
-  { label: 'L2노트', value: 'L2노트' },
   { label: '말하는섬', value: '말하는섬' },
+  { label: '각성서버', value: '각성서버' },
 ];
 
 interface Props {

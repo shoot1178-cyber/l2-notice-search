@@ -20,7 +20,6 @@ export function parseDate(dateStr: string): number {
 export const SERVER_COLORS: Record<string, string> = {
   '본서버': 'bg-blue-600 text-blue-100',
   '각성서버': 'bg-purple-600 text-purple-100',
-  'L2노트': 'bg-emerald-600 text-emerald-100',
   '말하는섬': 'bg-cyan-600 text-cyan-100',
 };
 

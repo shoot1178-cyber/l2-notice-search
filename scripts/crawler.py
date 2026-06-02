@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-리니지2 공식 홈페이지 전체 공지 크롤러
-대상: 본서버 / 각성서버 / L2노트
+리니지2 공식 홈페이지 공지 크롤러
+대상: 본서버 / 각성서버 (말하는섬은 본서버 게시판에서 제목으로 분류)
 저장 위치: notices/ 폴더
 """
 
@@ -32,12 +32,6 @@ BOARDS = [
         "url":         "https://lineage2.plaync.com/board/l2awknnotice/list",
         "board_id":    "l2awknnotice",
         "output_file": NOTICES_DIR / "l2_notices_각성서버.txt",
-    },
-    {
-        "name":        "L2노트",
-        "url":         "https://lineage2.plaync.com/board/l2note/list",
-        "board_id":    "l2note",
-        "output_file": NOTICES_DIR / "l2_notices_l2note.txt",
     },
 ]
 
@@ -123,6 +117,32 @@ def extract_article_id(href: str) -> str | None:
     return None
 
 
+def classify_server(board_name: str, title: str) -> str:
+    """게시판 이름과 제목으로 서버 분류"""
+    if board_name == "각성서버":
+        return "각성서버"
+    if "[말하는섬]" in title:
+        return "말하는섬"
+    return "본서버"
+
+
+def extract_date_from_text(text: str) -> str:
+    """텍스트에서 'YYYY년 MM월 DD일' 패턴 추출 → YYYY-MM-DD"""
+    m = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return ""
+
+
+def extract_date_from_title(title: str) -> str:
+    """제목에서 'N월 NN일' 패턴 추출 → 현재 연도 붙여 YYYY-MM-DD"""
+    m = re.search(r'(\d{1,2})월\s*(\d{1,2})일', title)
+    if m:
+        year = datetime.now().year
+        return f"{year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    return ""
+
+
 def format_notice(title: str, date: str, server: str, url: str, content: str) -> str:
     return (
         "================\n"
@@ -152,6 +172,15 @@ async def delay(lo: float = 1.0, hi: float = 2.0) -> None:
 
 # ── 목록 수집 ─────────────────────────────────────────────────────────────────
 async def collect_article_links(page, board_url: str, board_id: str, known_ids: set) -> list[dict]:
+    """
+    페이지네이션을 순회하며 새 공지 링크를 수집한다.
+    종료 조건:
+      1. 기존에 크롤링한 ID 발견 (증분 크롤링 시 중단점)
+      2. 페이지에서 공지 링크가 0건 (마지막 페이지 이후)
+      3. 타임아웃
+    _has_next_page() 셀렉터 의존 방식을 제거하고
+    '빈 페이지 = 종료' 방식으로 교체하여 안정성 향상.
+    """
     results = []
     page_num = 1
 
@@ -173,12 +202,14 @@ async def collect_article_links(page, board_url: str, board_id: str, known_ids: 
             if rows:
                 break
 
+        page_new: list[dict] = []
+        found_known = False
+
         if not rows:
             links = await page.query_selector_all(f"a[href*='/{board_id}/view']")
             if not links:
                 links = await page.query_selector_all(f"a[href*='/{board_id}/']")
 
-            found_known = False
             for a in links:
                 href = await a.get_attribute("href") or ""
                 aid = extract_article_id(href)
@@ -189,12 +220,8 @@ async def collect_article_links(page, board_url: str, board_id: str, known_ids: 
                     continue
                 title = (await a.inner_text()).strip()
                 full_url = (BASE_URL + href) if href.startswith("/") else href
-                results.append({"title": title, "date": "", "url": full_url, "article_id": aid})
-
-            if found_known or not links:
-                break
+                page_new.append({"title": title, "date": "", "url": full_url, "article_id": aid})
         else:
-            found_known = False
             for row in rows:
                 a_tag = await row.query_selector(f"a[href*='/{board_id}/']")
                 if not a_tag:
@@ -230,40 +257,23 @@ async def collect_article_links(page, board_url: str, board_id: str, known_ids: 
                             break
 
                 full_url = (BASE_URL + href) if href.startswith("/") else href
-                results.append({"title": title, "date": date, "url": full_url, "article_id": aid})
+                page_new.append({"title": title, "date": date, "url": full_url, "article_id": aid})
 
-            if found_known:
-                print("  🔵 기존 공지 발견 — 수집 중단")
-                break
+        results.extend(page_new)
+        print(f"  ✅ {page_num}페이지 완료 — {len(page_new)}건 신규 (누적 {len(results)}건)")
 
-        print(f"  ✅ {page_num}페이지 완료 (누적 {len(results)}개)")
+        if found_known:
+            print("  🔵 기존 공지 발견 — 수집 중단")
+            break
 
-        has_next = await _has_next_page(page, page_num)
-        if not has_next:
-            print("  🏁 마지막 페이지 도달")
+        if not page_new:
+            print("  🏁 빈 페이지 — 마지막 페이지 도달")
             break
 
         page_num += 1
         await delay(1.0, 2.0)
 
     return results
-
-
-async def _has_next_page(page, current: int) -> bool:
-    selectors = [
-        ".paging .next:not(.disabled):not([aria-disabled='true'])",
-        ".pagination .next:not(.disabled)",
-        ".btn-next:not(:disabled)",
-        ".page-next:not(.disabled)",
-        f"a[href*='page={current + 1}']",
-        f".paging a[data-page='{current + 1}']",
-        f"button[data-page='{current + 1}']",
-    ]
-    for sel in selectors:
-        el = await page.query_selector(sel)
-        if el:
-            return True
-    return False
 
 
 # ── 본문 수집 ─────────────────────────────────────────────────────────────────
@@ -319,10 +329,20 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
             print(f"  [{name}] {idx}/{len(articles)} — {art['title'][:45]}...")
             content = await fetch_content(page, art["url"])
 
+            # 날짜 추출 우선순위: HTML 셀렉터 → 본문 → 제목
+            date = art["date"]
+            if not date:
+                date = extract_date_from_text(content)
+            if not date:
+                date = extract_date_from_title(art["title"])
+
+            # 서버 분류 (본서버 게시판 공지 중 [말하는섬] 포함 → 말하는섬)
+            server = classify_server(name, art["title"])
+
             new_blocks.append(format_notice(
                 title=art["title"],
-                date=art["date"],
-                server=name,
+                date=date,
+                server=server,
                 url=art["url"],
                 content=content,
             ))

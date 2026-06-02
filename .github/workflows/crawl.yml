@@ -40,7 +40,9 @@ jobs:
 
       - name: Reset crawled IDs (force_all)
         if: ${{ github.event.inputs.force_all == 'true' }}
-        run: rm -f notices/crawled_ids.json
+        run: |
+          rm -f notices/crawled_ids.json
+          rm -f notices/l2_notices_*.txt
 
       - name: Run crawler
         run: python scripts/crawler.py

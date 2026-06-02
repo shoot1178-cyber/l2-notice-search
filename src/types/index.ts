@@ -1,4 +1,4 @@
-export type ServerType = '전체' | '본서버' | '각성서버' | 'L2노트' | '말하는섬';
+export type ServerType = '전체' | '본서버' | '각성서버' | '말하는섬';
 
 export interface Notice {
   id: string;
