@@ -23,14 +23,14 @@ NOTICES_DIR = Path("notices")
 BOARDS = [
     {
         "name":        "본서버",
-        "url":         "https://lineage2.plaync.com/board/l2notice/list",
-        "board_id":    "l2notice",
+        "url":         "https://lineage2.plaync.com/board/l2update/list",
+        "board_id":    "l2update",
         "output_file": NOTICES_DIR / "l2_notices_본서버.txt",
     },
     {
         "name":        "각성서버",
-        "url":         "https://lineage2.plaync.com/board/l2awknnotice/list",
-        "board_id":    "l2awknnotice",
+        "url":         "https://lineage2.plaync.com/board/l2awknupdate/list",
+        "board_id":    "l2awknupdate",
         "output_file": NOTICES_DIR / "l2_notices_각성서버.txt",
     },
 ]
