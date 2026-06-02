@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
 
   const userMessage = `${systemPrompt}\n\n공지사항 목록 (${relevant.length}건):\n\n${noticesText}\n\n---\n질문: ${query}`;
 
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`;
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
   try {
     const geminiRes = await fetch(geminiUrl, {
