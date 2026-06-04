@@ -156,15 +156,6 @@ def format_notice(title: str, date: str, server: str, url: str, content: str) ->
     )
 
 
-def prepend_to_file(filepath: Path, text: str) -> None:
-    filepath.parent.mkdir(exist_ok=True)
-    existing = ""
-    if filepath.exists():
-        with open(filepath, "r", encoding="utf-8") as f:
-            existing = f.read()
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(text + existing)
-
 
 async def delay(lo: float = 1.0, hi: float = 2.0) -> None:
     await asyncio.sleep(random.uniform(lo, hi))
@@ -322,24 +313,24 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
             print(f"  [{name}] 새 공지 없음")
             return 0
 
+        SAVE_INTERVAL = 20
         print(f"\n  [{name}] 새 공지 {len(articles)}건 본문 수집 시작")
-        new_blocks: list[str] = []
+        buffer: list[str] = []
+        total_new = 0
 
         for idx, art in enumerate(articles, 1):
             print(f"  [{name}] {idx}/{len(articles)} — {art['title'][:45]}...")
             content = await fetch_content(page, art["url"])
 
-            # 날짜 추출 우선순위: HTML 셀렉터 → 본문 → 제목
             date = art["date"]
             if not date:
                 date = extract_date_from_text(content)
             if not date:
                 date = extract_date_from_title(art["title"])
 
-            # 서버 분류 (본서버 게시판 공지 중 [말하는섬] 포함 → 말하는섬)
             server = classify_server(name, art["title"])
 
-            new_blocks.append(format_notice(
+            buffer.append(format_notice(
                 title=art["title"],
                 date=date,
                 server=server,
@@ -350,12 +341,26 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
             crawled_ids.setdefault(board_id, [])
             if art["article_id"] not in crawled_ids[board_id]:
                 crawled_ids[board_id].append(art["article_id"])
+            total_new += 1
+
+            if len(buffer) >= SAVE_INTERVAL:
+                out_file.parent.mkdir(exist_ok=True)
+                with open(out_file, "a", encoding="utf-8") as f:
+                    f.write("".join(buffer))
+                buffer.clear()
+                save_crawled_ids(crawled_ids)
+                print(f"  [{name}] 💾 중간 저장: {total_new}건")
 
             await delay(1.0, 2.0)
 
-        prepend_to_file(out_file, "".join(new_blocks))
-        print(f"  [{name}] ✅ {len(new_blocks)}건 저장 → {out_file}")
-        return len(new_blocks)
+        if buffer:
+            out_file.parent.mkdir(exist_ok=True)
+            with open(out_file, "a", encoding="utf-8") as f:
+                f.write("".join(buffer))
+            save_crawled_ids(crawled_ids)
+
+        print(f"  [{name}] ✅ {total_new}건 저장 → {out_file}")
+        return total_new
 
     finally:
         await page.close()
