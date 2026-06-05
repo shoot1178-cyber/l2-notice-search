@@ -329,7 +329,6 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
                         crawled_ids.setdefault(board_id, [])
                         if art["article_id"] not in crawled_ids[board_id]:
                             crawled_ids[board_id].append(art["article_id"])
-                        known_ids.add(art["article_id"])
                         total_new += 1
 
                         await delay(1.0, 2.0)
