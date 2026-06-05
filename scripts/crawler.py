@@ -9,6 +9,7 @@ import asyncio
 import json
 import random
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -101,6 +102,27 @@ def save_crawled_ids(data: dict) -> None:
     NOTICES_DIR.mkdir(exist_ok=True)
     with open(CRAWLED_IDS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def git_push_checkpoint(message: str) -> None:
+    """crawled_ids.json을 git add/commit/push — Actions 타임아웃 시 진행상황 보존."""
+    print(f"  🚀 Git push 시도: {message}")
+    try:
+        subprocess.run(["git", "add", "-f", str(CRAWLED_IDS_FILE)], check=True, timeout=30)
+        result = subprocess.run(
+            ["git", "commit", "-m", message],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0 and "nothing to commit" in (result.stdout + result.stderr):
+            print("  ℹ️  커밋할 변경사항 없음 — push 생략")
+            return
+        result.check_returncode()
+        subprocess.run(["git", "push"], check=True, timeout=60)
+        print(f"  ✅ Git push 완료: {message}")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️  Git push 실패 (무시): {e}")
+    except subprocess.TimeoutExpired:
+        print("  ⚠️  Git push 타임아웃 (무시)")
 
 
 def extract_article_id(href: str) -> str | None:
@@ -272,7 +294,7 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
     """
     페이지 단위로 처리:
       목록 1페이지 수집 → 즉시 본문 수집 → crawled_ids.json 저장 → 다음 페이지
-    git push는 Actions workflow가 종료 시 일괄 처리한다.
+    200페이지마다 git push하여 Actions 타임아웃 시에도 진행상황 보존.
     """
     name = board["name"]
     board_id = board["board_id"]
@@ -288,6 +310,7 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
+    PUSH_INTERVAL = 200
     total_new = 0
     page_num = 1
 
@@ -333,9 +356,11 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
 
                         await delay(1.0, 2.0)
 
-                # 3) 매 페이지 저장
+                # 3) 매 페이지 저장, 200페이지마다 git push
                 save_crawled_ids(crawled_ids)
                 print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
+                if page_num % PUSH_INTERVAL == 0:
+                    git_push_checkpoint(f"crawler: [{name}] p{page_num} 완료 (총 {total_new}건)")
 
             # 4) 종료 조건
             if found_known:
@@ -344,6 +369,10 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
 
             page_num += 1
             await delay(1.0, 2.0)
+
+        # 루프 종료 후 마지막 미push 분 처리
+        if total_new > 0 and page_num % PUSH_INTERVAL != 0:
+            git_push_checkpoint(f"crawler: [{name}] 완료 p{page_num} (총 {total_new}건)")
 
     finally:
         await page.close()
