@@ -9,6 +9,7 @@ import asyncio
 import json
 import random
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -101,6 +102,25 @@ def save_crawled_ids(data: dict) -> None:
     NOTICES_DIR.mkdir(exist_ok=True)
     with open(CRAWLED_IDS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def git_push_checkpoint(message: str) -> None:
+    """crawled_ids.json을 git add/commit/push하여 Actions 타임아웃 시에도 진행상황 보존."""
+    try:
+        subprocess.run(["git", "add", str(CRAWLED_IDS_FILE)], check=True, timeout=30)
+        result = subprocess.run(
+            ["git", "commit", "-m", message],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0 and "nothing to commit" in result.stdout + result.stderr:
+            return
+        result.check_returncode()
+        subprocess.run(["git", "push"], check=True, timeout=60)
+        print(f"  🚀 Git push 완료: {message}")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️  Git push 실패 (무시): {e}")
+    except subprocess.TimeoutExpired:
+        print("  ⚠️  Git push 타임아웃 (무시)")
 
 
 def extract_article_id(href: str) -> str | None:
@@ -350,6 +370,7 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
                 buffer.clear()
                 save_crawled_ids(crawled_ids)
                 print(f"  [{name}] 💾 중간 저장: {total_new}건")
+                git_push_checkpoint(f"crawler: checkpoint [{name}] {total_new}건 저장")
 
             await delay(1.0, 2.0)
 
