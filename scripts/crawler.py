@@ -138,7 +138,6 @@ def extract_article_id(href: str) -> str | None:
 
 
 def classify_server(board_name: str, title: str) -> str:
-    """게시판 이름과 제목으로 서버 분류"""
     if board_name == "각성서버":
         return "각성서버"
     if "[말하는섬]" in title:
@@ -147,7 +146,6 @@ def classify_server(board_name: str, title: str) -> str:
 
 
 def extract_date_from_text(text: str) -> str:
-    """텍스트에서 'YYYY년 MM월 DD일' 패턴 추출 → YYYY-MM-DD"""
     m = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', text)
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
@@ -155,7 +153,6 @@ def extract_date_from_text(text: str) -> str:
 
 
 def extract_date_from_title(title: str) -> str:
-    """제목에서 'N월 NN일' 패턴 추출 → 현재 연도 붙여 YYYY-MM-DD"""
     m = re.search(r'(\d{1,2})월\s*(\d{1,2})일', title)
     if m:
         year = datetime.now().year
@@ -176,115 +173,95 @@ def format_notice(title: str, date: str, server: str, url: str, content: str) ->
     )
 
 
-
 async def delay(lo: float = 1.0, hi: float = 2.0) -> None:
     await asyncio.sleep(random.uniform(lo, hi))
 
 
-# ── 목록 수집 ─────────────────────────────────────────────────────────────────
-async def collect_article_links(page, board_url: str, board_id: str, known_ids: set) -> list[dict]:
+# ── 단일 목록 페이지 수집 ──────────────────────────────────────────────────────
+async def collect_one_page(
+    page, board_url: str, board_id: str, page_num: int, known_ids: set
+) -> tuple[list[dict], bool]:
     """
-    페이지네이션을 순회하며 새 공지 링크를 수집한다.
-    종료 조건:
-      1. 기존에 크롤링한 ID 발견 (증분 크롤링 시 중단점)
-      2. 페이지에서 공지 링크가 0건 (마지막 페이지 이후)
-      3. 타임아웃
-    _has_next_page() 셀렉터 의존 방식을 제거하고
-    '빈 페이지 = 종료' 방식으로 교체하여 안정성 향상.
+    목록 한 페이지에서 새 공지 링크를 추출한다.
+    반환: (articles, found_known)
+      - articles: 이 페이지의 신규 공지 목록
+      - found_known: 이미 크롤링한 ID가 발견되면 True (이후 페이지 중단 신호)
     """
-    results = []
-    page_num = 1
+    list_url = board_url if page_num == 1 else f"{board_url}?page={page_num}"
+    print(f"  📄 목록 {page_num}페이지 로딩: {list_url}")
 
-    while True:
-        list_url = board_url if page_num == 1 else f"{board_url}?page={page_num}"
-        print(f"  📄 목록 {page_num}페이지 로딩: {list_url}")
+    try:
+        await page.goto(list_url, wait_until="networkidle", timeout=30_000)
+    except PlaywrightTimeoutError:
+        print(f"  ⚠️  {page_num}페이지 타임아웃 — 목록 수집 중단")
+        return [], False
 
-        try:
-            await page.goto(list_url, wait_until="networkidle", timeout=30_000)
-        except PlaywrightTimeoutError:
-            print(f"  ⚠️  {page_num}페이지 타임아웃 — 목록 수집 중단")
+    await page.wait_for_timeout(2_000)
+
+    rows = []
+    for sel in LIST_ROW_SELECTORS:
+        rows = await page.query_selector_all(sel)
+        if rows:
             break
 
-        await page.wait_for_timeout(2_000)
+    articles: list[dict] = []
+    found_known = False
 
-        rows = []
-        for sel in LIST_ROW_SELECTORS:
-            rows = await page.query_selector_all(sel)
-            if rows:
-                break
+    if not rows:
+        links = await page.query_selector_all(f"a[href*='/{board_id}/view']")
+        if not links:
+            links = await page.query_selector_all(f"a[href*='/{board_id}/']")
 
-        page_new: list[dict] = []
-        found_known = False
+        for a in links:
+            href = await a.get_attribute("href") or ""
+            aid = extract_article_id(href)
+            if not aid:
+                continue
+            if aid in known_ids:
+                found_known = True
+                continue
+            title = (await a.inner_text()).strip()
+            full_url = (BASE_URL + href) if href.startswith("/") else href
+            articles.append({"title": title, "date": "", "url": full_url, "article_id": aid})
+    else:
+        for row in rows:
+            a_tag = await row.query_selector(f"a[href*='/{board_id}/']")
+            if not a_tag:
+                a_tag = await row.query_selector("a")
+            if not a_tag:
+                continue
 
-        if not rows:
-            links = await page.query_selector_all(f"a[href*='/{board_id}/view']")
-            if not links:
-                links = await page.query_selector_all(f"a[href*='/{board_id}/']")
+            href = await a_tag.get_attribute("href") or ""
+            aid = extract_article_id(href)
+            if not aid:
+                continue
 
-            for a in links:
-                href = await a.get_attribute("href") or ""
-                aid = extract_article_id(href)
-                if not aid:
-                    continue
-                if aid in known_ids:
-                    found_known = True
-                    continue
-                title = (await a.inner_text()).strip()
-                full_url = (BASE_URL + href) if href.startswith("/") else href
-                page_new.append({"title": title, "date": "", "url": full_url, "article_id": aid})
-        else:
-            for row in rows:
-                a_tag = await row.query_selector(f"a[href*='/{board_id}/']")
-                if not a_tag:
-                    a_tag = await row.query_selector("a")
-                if not a_tag:
-                    continue
+            if aid in known_ids:
+                found_known = True
+                continue
 
-                href = await a_tag.get_attribute("href") or ""
-                aid = extract_article_id(href)
-                if not aid:
-                    continue
+            title = ""
+            for tsel in TITLE_SELECTORS:
+                t_el = await row.query_selector(tsel)
+                if t_el:
+                    title = (await t_el.inner_text()).strip()
+                    if title:
+                        break
+            if not title:
+                title = (await a_tag.inner_text()).strip()
 
-                if aid in known_ids:
-                    found_known = True
-                    continue
+            date = ""
+            for dsel in DATE_SELECTORS:
+                d_el = await row.query_selector(dsel)
+                if d_el:
+                    date = (await d_el.inner_text()).strip()
+                    if date:
+                        break
 
-                title = ""
-                for tsel in TITLE_SELECTORS:
-                    t_el = await row.query_selector(tsel)
-                    if t_el:
-                        title = (await t_el.inner_text()).strip()
-                        if title:
-                            break
-                if not title:
-                    title = (await a_tag.inner_text()).strip()
+            full_url = (BASE_URL + href) if href.startswith("/") else href
+            articles.append({"title": title, "date": date, "url": full_url, "article_id": aid})
 
-                date = ""
-                for dsel in DATE_SELECTORS:
-                    d_el = await row.query_selector(dsel)
-                    if d_el:
-                        date = (await d_el.inner_text()).strip()
-                        if date:
-                            break
-
-                full_url = (BASE_URL + href) if href.startswith("/") else href
-                page_new.append({"title": title, "date": date, "url": full_url, "article_id": aid})
-
-        results.extend(page_new)
-        print(f"  ✅ {page_num}페이지 완료 — {len(page_new)}건 신규 (누적 {len(results)}건)")
-
-        if found_known:
-            print("  🔵 기존 공지 발견 — 수집 중단")
-            break
-
-        if not page_new:
-            print("  🏁 빈 페이지 — 마지막 페이지 도달")
-            break
-
-        page_num += 1
-        await delay(1.0, 2.0)
-
-    return results
+    return articles, found_known
 
 
 # ── 본문 수집 ─────────────────────────────────────────────────────────────────
@@ -312,6 +289,11 @@ async def fetch_content(page, url: str) -> str:
 
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
+    """
+    페이지 단위로 처리:
+      목록 1페이지 수집 → 즉시 본문 수집 → 저장 → git push → 다음 페이지
+    Actions 타임아웃으로 중단되어도 완료된 페이지까지 GitHub에 보존된다.
+    """
     name = board["name"]
     board_id = board["board_id"]
     out_file = board["output_file"]
@@ -326,65 +308,70 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
 
+    total_new = 0
+    page_num = 1
+
     try:
-        articles = await collect_article_links(page, board["url"], board_id, known_ids)
+        while True:
+            # 1) 목록 한 페이지 수집
+            articles, found_known = await collect_one_page(
+                page, board["url"], board_id, page_num, known_ids
+            )
 
-        if not articles:
-            print(f"  [{name}] 새 공지 없음")
-            return 0
+            # 빈 페이지 = 마지막 페이지 이후
+            if not articles and not found_known:
+                print("  🏁 빈 페이지 — 마지막 페이지 도달")
+                break
 
-        SAVE_INTERVAL = 20
-        print(f"\n  [{name}] 새 공지 {len(articles)}건 본문 수집 시작")
-        buffer: list[str] = []
-        total_new = 0
-
-        for idx, art in enumerate(articles, 1):
-            print(f"  [{name}] {idx}/{len(articles)} — {art['title'][:45]}...")
-            content = await fetch_content(page, art["url"])
-
-            date = art["date"]
-            if not date:
-                date = extract_date_from_text(content)
-            if not date:
-                date = extract_date_from_title(art["title"])
-
-            server = classify_server(name, art["title"])
-
-            buffer.append(format_notice(
-                title=art["title"],
-                date=date,
-                server=server,
-                url=art["url"],
-                content=content,
-            ))
-
-            crawled_ids.setdefault(board_id, [])
-            if art["article_id"] not in crawled_ids[board_id]:
-                crawled_ids[board_id].append(art["article_id"])
-            total_new += 1
-
-            if len(buffer) >= SAVE_INTERVAL:
+            # 2) 이 페이지의 신규 공지 본문 즉시 수집 → 파일에 바로 씀
+            if articles:
+                print(f"  [{name}] p{page_num} — {len(articles)}건 본문 수집")
                 out_file.parent.mkdir(exist_ok=True)
                 with open(out_file, "a", encoding="utf-8") as f:
-                    f.write("".join(buffer))
-                buffer.clear()
+                    for idx, art in enumerate(articles, 1):
+                        print(f"  [{name}] p{page_num} {idx}/{len(articles)} — {art['title'][:45]}...")
+                        content = await fetch_content(page, art["url"])
+
+                        date = art["date"]
+                        if not date:
+                            date = extract_date_from_text(content)
+                        if not date:
+                            date = extract_date_from_title(art["title"])
+
+                        f.write(format_notice(
+                            title=art["title"],
+                            date=date,
+                            server=classify_server(name, art["title"]),
+                            url=art["url"],
+                            content=content,
+                        ))
+
+                        crawled_ids.setdefault(board_id, [])
+                        if art["article_id"] not in crawled_ids[board_id]:
+                            crawled_ids[board_id].append(art["article_id"])
+                        known_ids.add(art["article_id"])
+                        total_new += 1
+
+                        await delay(1.0, 2.0)
+
+                # 3) 페이지 단위 저장 + git push
                 save_crawled_ids(crawled_ids)
-                print(f"  [{name}] 💾 중간 저장: {total_new}건")
-                git_push_checkpoint(f"crawler: checkpoint [{name}] {total_new}건 저장")
+                print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
+                git_push_checkpoint(f"crawler: [{name}] p{page_num} 완료 (총 {total_new}건)")
 
+            # 4) 종료 조건
+            if found_known:
+                print("  🔵 기존 공지 발견 — 수집 중단")
+                break
+
+            page_num += 1
             await delay(1.0, 2.0)
-
-        if buffer:
-            out_file.parent.mkdir(exist_ok=True)
-            with open(out_file, "a", encoding="utf-8") as f:
-                f.write("".join(buffer))
-            save_crawled_ids(crawled_ids)
-
-        print(f"  [{name}] ✅ {total_new}건 저장 → {out_file}")
-        return total_new
 
     finally:
         await page.close()
+
+    print(f"  [{name}] ✅ {total_new}건 저장 → {out_file}")
+    return total_new
 
 
 async def main() -> None:
