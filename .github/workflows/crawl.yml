@@ -49,7 +49,8 @@ jobs:
       - name: Reset crawled IDs (force_all)
         if: ${{ github.event.inputs.force_all == 'true' }}
         run: |
-          git rm -f --ignore-unmatch notices/crawled_ids.json notices/l2_notices_본서버.txt notices/l2_notices_각성서버.txt
+          echo '{}' > notices/crawled_ids.json
+          rm -f notices/l2_notices_본서버.txt notices/l2_notices_각성서버.txt
 
       - name: Run crawler
         run: python scripts/crawler.py
