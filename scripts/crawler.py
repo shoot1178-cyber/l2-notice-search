@@ -105,10 +105,11 @@ def save_crawled_ids(data: dict) -> None:
 
 
 def git_push_checkpoint(message: str) -> None:
-    """crawled_ids.json을 git add/commit/push — Actions 타임아웃 시 진행상황 보존."""
+    """crawled_ids.json + 공지 텍스트 파일을 git add/commit/push — Actions 타임아웃 시 진행상황 보존."""
     print(f"  🚀 Git push 시도: {message}")
     try:
-        subprocess.run(["git", "add", "-f", str(CRAWLED_IDS_FILE)], check=True, timeout=30)
+        files_to_add = [str(CRAWLED_IDS_FILE)] + [str(b["output_file"]) for b in BOARDS]
+        subprocess.run(["git", "add"] + files_to_add, check=True, timeout=30)
         result = subprocess.run(
             ["git", "commit", "-m", message],
             capture_output=True, text=True, timeout=30,
