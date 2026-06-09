@@ -36,4 +36,3 @@ next-env.d.ts
 # python
 __pycache__/
 *.pyc
-crawled_ids.json
