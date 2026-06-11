@@ -127,11 +127,12 @@ def git_push_checkpoint(message: str) -> None:
 
 
 def extract_article_id(href: str) -> str | None:
+    # 공지 ID는 hex 문자열(예: 681a8c6371889956d8d8cda1)이므로 [a-fA-F0-9]+ 사용
     patterns = [
-        r"articleId=(\d+)",
-        r"/view/(\d+)",
-        r"article[_-]?[Ii]d=(\d+)",
-        r"[?&]id=(\d+)",
+        r"articleId=([a-fA-F0-9]+)",
+        r"/view/([a-fA-F0-9]+)",
+        r"article[_-]?[Ii]d=([a-fA-F0-9]+)",
+        r"[?&]id=([a-fA-F0-9]+)",
     ]
     for p in patterns:
         m = re.search(p, href)

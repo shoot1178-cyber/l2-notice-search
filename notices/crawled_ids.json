@@ -1,14 +1,52 @@
 {
   "l2update": [
-    "6",
-    "68766",
-    "69"
+    "68766cf070a9d9546295dd5f",
+    "68766cf070a9d9546295dd62",
+    "6a155ec521dd254f7456b483",
+    "6a1625f05716f56bbe7ebea5",
+    "6a0cdf9edbc3a96f15993d2c",
+    "6a0ce44e6bea861b7fd19b3d",
+    "6a03b0f0d518ed36f2b2b811",
+    "6a03b0f0d518ed36f2b2b80f",
+    "68766cf0cdd7422c7202e628",
+    "68766cf0cdd7422c7202e62b",
+    "69f130f3b38bc51d715942bf",
+    "69f1349fe728c75cb9d699de",
+    "68766cf09533632c1f77a67a",
+    "69e801705716f56bbe7eb8d1",
+    "69e801705716f56bbe7eb8d3",
+    "69dec6f08e4b812507d44848",
+    "69dec6f08e4b812507d44846",
+    "68766cf01e8a8c5fcd9b4486",
+    "6a289af0b1a52047c72addfc",
+    "6a289af0b1a52047c72addfa"
   ],
-  "l2awknupdate": [
-    "6",
-    "681",
-    "69"
-  ],
+<<<<<<< HEAD
   "l2update_last_page": 1200,
   "l2awknupdate_last_page": 1200
+=======
+  "l2update_last_page": 0,
+  "l2awknupdate": [
+    "681a8c6371889956d8d8cda1",
+    "6a15817662b9762d274f9a9d",
+    "6a0ce1096bea861b7fd19b3c",
+    "6a0181fc8cd2017bc6f01dfc",
+    "681a8c63ba183e547473b2a2",
+    "69f13025c55ab92aaccccd23",
+    "69ef392eb1bf675388fc5413",
+    "69e801704b054450af1110d8",
+    "69dec6f0971c565085bbc21c",
+    "681a8c63971c565085bbc16b",
+    "681a8c635428ae5b4ea04a9b",
+    "69cc51f055f9741f2cd9b8d5",
+    "681a8c630cb1d018984f83a0",
+    "69b9d207088af7222b91edad",
+    "69b0a270ff725971d1f1b2b2",
+    "681a8c6344c2c17f6de3049c",
+    "69a75d2df6647a3c50bc2855",
+    "699d7c23a78c3e2fcf07e7f7",
+    "6a289af0b1a52047c72addf8"
+  ],
+  "l2awknupdate_last_page": 0
+>>>>>>> 88ac0c7 (crawler: hex 아티클 ID 파싱 버그 수정)
 }
