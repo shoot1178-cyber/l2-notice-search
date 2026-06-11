@@ -56,7 +56,6 @@ def parse_notice_file(filepath: Path) -> list[dict]:
             "date": date,
             "server": server or "본서버",
             "url": url,
-            "content": content,
             "preview": preview,
         })
 
