@@ -34,22 +34,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-playwright
-
-      - name: Install Python dependencies
-        run: |
-          pip install playwright
-          playwright install chromium
-          playwright install-deps chromium
-
       - name: Reset crawled IDs (force_all)
         if: ${{ github.event.inputs.force_all == 'true' }}
         run: |
-          echo '{}' > notices/crawled_ids.json
+          cat > notices/crawled_ids.json << 'EOF'
+          {"l2update":[],"l2update_cursor":null,"l2update_complete":false,"l2awknupdate":[],"l2awknupdate_cursor":null,"l2awknupdate_complete":false}
+          EOF
           rm -f notices/l2_notices_본서버.txt notices/l2_notices_각성서버.txt
 
       - name: Run crawler

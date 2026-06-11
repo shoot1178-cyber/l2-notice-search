@@ -3,6 +3,8 @@
 notices/ 폴더의 모든 txt 파일을 파싱해 notices/index.json 생성
 GitHub Actions 에서 크롤러 실행 후 이 스크립트를 실행한다.
 """
+import sys
+sys.stdout.reconfigure(errors='replace')
 
 import json
 import re
