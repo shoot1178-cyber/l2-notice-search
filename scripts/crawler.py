@@ -210,7 +210,7 @@ async def collect_one_page(
             break
 
     articles: list[dict] = []
-    found_known = False
+    skipped_known = 0  # known_ids에 있어 건너뛴 수
 
     if not rows:
         links = await page.query_selector_all(f"a[href*='/{board_id}/view']")
@@ -223,7 +223,7 @@ async def collect_one_page(
             if not aid:
                 continue
             if aid in known_ids:
-                found_known = True
+                skipped_known += 1
                 continue
             title = (await a.inner_text()).strip()
             full_url = (BASE_URL + href) if href.startswith("/") else href
@@ -242,7 +242,7 @@ async def collect_one_page(
                 continue
 
             if aid in known_ids:
-                found_known = True
+                skipped_known += 1
                 continue
 
             title = ""
@@ -266,7 +266,13 @@ async def collect_one_page(
             full_url = (BASE_URL + href) if href.startswith("/") else href
             articles.append({"title": title, "date": date, "url": full_url, "article_id": aid})
 
-    return articles, found_known
+    # 진단 로그: 첫 5페이지는 ID 현황 상세 출력
+    if page_num <= 5:
+        total = len(articles) + skipped_known
+        sample = [a["article_id"][:16] for a in articles[:3]]
+        print(f"  [진단] p{page_num}: 추출 {total}개 → 신규 {len(articles)}개 / 기존 {skipped_known}개 (known_ids 보유: {len(known_ids)}개) 신규샘플={sample}")
+
+    return articles, skipped_known > 0
 
 
 # ── 본문 수집 ─────────────────────────────────────────────────────────────────
@@ -317,8 +323,10 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
     )
 
     PUSH_INTERVAL = 200
+    MAX_CONSECUTIVE_KNOWN = 5  # 연속 N페이지 신규 0건이면 수집 완료로 판단
     total_new = 0
     pages_since_push = 0
+    consecutive_known_only = 0
 
     try:
         print(f"\n  [{name}] p{start_page}부터 수집 시작")
@@ -333,6 +341,16 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
                 crawled_ids[last_page_key] = 0
                 save_crawled_ids(crawled_ids)
                 break
+
+            if not articles and has_known:
+                consecutive_known_only += 1
+                if consecutive_known_only >= MAX_CONSECUTIVE_KNOWN:
+                    print(f"  🏁 {MAX_CONSECUTIVE_KNOWN}페이지 연속 신규 0건 — 수집 완료, last_page 리셋")
+                    crawled_ids[last_page_key] = 0
+                    save_crawled_ids(crawled_ids)
+                    break
+            else:
+                consecutive_known_only = 0
 
             if articles:
                 print(f"  [{name}] p{page_num} — {len(articles)}건 본문 수집")
