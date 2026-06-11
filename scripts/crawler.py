@@ -383,6 +383,7 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
         history_start = max(saved_last + 1, phase1_end + 1)
         print(f"\n  [{name}] Phase 2: 과거 공지 수집 (p{history_start}~, 이전 저장: p{saved_last})")
         page_num = history_start
+        pages_since_push = 0
 
         while True:
             articles, found_known = await collect_one_page(
@@ -394,22 +395,27 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
                 print("  🏁 빈 페이지 — 과거 공지 수집 완료")
                 break
 
+            # 진행 페이지 저장 (last_page는 항상 갱신)
+            crawled_ids[last_page_key] = page_num
+
             if articles:
                 print(f"  [{name}] p{page_num} — {len(articles)}건 본문 수집")
                 await process_articles(articles, page_num)
+                save_crawled_ids(crawled_ids)
+                print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
+            else:
+                save_crawled_ids(crawled_ids)
 
-            # 진행 페이지 저장 (빈 페이지가 아닐 때마다)
-            crawled_ids[last_page_key] = page_num
-            save_crawled_ids(crawled_ids)
-            print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
-            if page_num % PUSH_INTERVAL == 0:
+            pages_since_push += 1
+            if pages_since_push >= PUSH_INTERVAL:
                 git_push_checkpoint(f"crawler: [{name}] 과거 p{page_num} 완료 (총 {total_new}건)")
+                pages_since_push = 0
 
             page_num += 1
             await delay(1.0, 2.0)
 
         # 루프 종료 후 마지막 미push 분 처리
-        if total_new > 0 and page_num % PUSH_INTERVAL != 0:
+        if total_new > 0 and pages_since_push > 0:
             git_push_checkpoint(f"crawler: [{name}] 완료 p{page_num} (총 {total_new}건)")
 
     finally:
