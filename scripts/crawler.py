@@ -293,13 +293,16 @@ async def fetch_content(page, url: str) -> str:
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
     """
-    페이지 단위로 처리:
-      목록 1페이지 수집 → 즉시 본문 수집 → crawled_ids.json 저장 → 다음 페이지
+    두 단계로 수집:
+      Phase 1) p1부터 기존 ID 발견 시까지 — 신규 공지
+      Phase 2) 마지막으로 저장한 페이지 다음부터 — 과거 공지 이어서
     200페이지마다 git push하여 Actions 타임아웃 시에도 진행상황 보존.
+    last_page 키: crawled_ids["{board_id}_last_page"] 에 저장.
     """
     name = board["name"]
     board_id = board["board_id"]
     out_file = board["output_file"]
+    last_page_key = f"{board_id}_last_page"
 
     print(f"\n{'='*55}")
     print(f"  [{name}] 크롤링 시작")
@@ -313,60 +316,94 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
 
     PUSH_INTERVAL = 200
     total_new = 0
-    page_num = 1
+
+    async def process_articles(articles: list[dict], page_num: int) -> None:
+        nonlocal total_new
+        if not articles:
+            return
+        out_file.parent.mkdir(exist_ok=True)
+        with open(out_file, "a", encoding="utf-8") as f:
+            for idx, art in enumerate(articles, 1):
+                print(f"  [{name}] p{page_num} {idx}/{len(articles)} — {art['title'][:45]}...")
+                content = await fetch_content(page, art["url"])
+
+                date = art["date"]
+                if not date:
+                    date = extract_date_from_text(content)
+                if not date:
+                    date = extract_date_from_title(art["title"])
+
+                f.write(format_notice(
+                    title=art["title"],
+                    date=date,
+                    server=classify_server(name, art["title"]),
+                    url=art["url"],
+                    content=content,
+                ))
+
+                crawled_ids.setdefault(board_id, [])
+                if art["article_id"] not in crawled_ids[board_id]:
+                    crawled_ids[board_id].append(art["article_id"])
+                known_ids.add(art["article_id"])
+                total_new += 1
+                await delay(1.0, 2.0)
 
     try:
+        # ── Phase 1: 신규 공지 수집 (p1 → 기존 ID 발견 시 중단) ──────────────
+        phase1_end = 0
+        page_num = 1
+        print(f"\n  [{name}] Phase 1: 신규 공지 수집 시작")
         while True:
-            # 1) 목록 한 페이지 수집
             articles, found_known = await collect_one_page(
                 page, board["url"], board_id, page_num, known_ids
             )
 
-            # 빈 페이지 = 마지막 페이지 이후
-            if not articles and not found_known:
-                print("  🏁 빈 페이지 — 마지막 페이지 도달")
-                break
-
-            # 2) 이 페이지의 신규 공지 본문 즉시 수집 → 파일에 바로 씀
             if articles:
                 print(f"  [{name}] p{page_num} — {len(articles)}건 본문 수집")
-                out_file.parent.mkdir(exist_ok=True)
-                with open(out_file, "a", encoding="utf-8") as f:
-                    for idx, art in enumerate(articles, 1):
-                        print(f"  [{name}] p{page_num} {idx}/{len(articles)} — {art['title'][:45]}...")
-                        content = await fetch_content(page, art["url"])
-
-                        date = art["date"]
-                        if not date:
-                            date = extract_date_from_text(content)
-                        if not date:
-                            date = extract_date_from_title(art["title"])
-
-                        f.write(format_notice(
-                            title=art["title"],
-                            date=date,
-                            server=classify_server(name, art["title"]),
-                            url=art["url"],
-                            content=content,
-                        ))
-
-                        crawled_ids.setdefault(board_id, [])
-                        if art["article_id"] not in crawled_ids[board_id]:
-                            crawled_ids[board_id].append(art["article_id"])
-                        total_new += 1
-
-                        await delay(1.0, 2.0)
-
-                # 3) 매 페이지 저장, 200페이지마다 git push
+                await process_articles(articles, page_num)
                 save_crawled_ids(crawled_ids)
                 print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
                 if page_num % PUSH_INTERVAL == 0:
                     git_push_checkpoint(f"crawler: [{name}] p{page_num} 완료 (총 {total_new}건)")
 
-            # 4) 종료 조건
             if found_known:
-                print("  🔵 기존 공지 발견 — 수집 중단")
+                phase1_end = page_num
+                print(f"  🔵 기존 공지 발견 — Phase 1 완료 (p{phase1_end})")
                 break
+
+            if not articles and not found_known:
+                print("  🏁 빈 페이지 — Phase 1 완료 (새 공지 없음)")
+                break
+
+            page_num += 1
+            await delay(1.0, 2.0)
+
+        # ── Phase 2: 과거 공지 이어서 수집 ──────────────────────────────────
+        saved_last = crawled_ids.get(last_page_key, 0)
+        history_start = max(saved_last + 1, phase1_end + 1)
+        print(f"\n  [{name}] Phase 2: 과거 공지 수집 (p{history_start}~, 이전 저장: p{saved_last})")
+        page_num = history_start
+
+        while True:
+            articles, found_known = await collect_one_page(
+                page, board["url"], board_id, page_num, known_ids
+            )
+
+            # 완전히 빈 페이지 = 진짜 마지막
+            if not articles and not found_known:
+                print("  🏁 빈 페이지 — 과거 공지 수집 완료")
+                break
+
+            if articles:
+                print(f"  [{name}] p{page_num} — {len(articles)}건 본문 수집")
+                await process_articles(articles, page_num)
+
+            # 진행 페이지 저장 (빈 페이지가 아닐 때마다)
+            crawled_ids[last_page_key] = page_num
+            save_crawled_ids(crawled_ids)
+            print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
+            if page_num % PUSH_INTERVAL == 0:
+                git_push_checkpoint(f"crawler: [{name}] 과거 p{page_num} 완료 (총 {total_new}건)")
 
             page_num += 1
             await delay(1.0, 2.0)
