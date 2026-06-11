@@ -21,10 +21,6 @@
     "6a289af0b1a52047c72addfc",
     "6a289af0b1a52047c72addfa"
   ],
-<<<<<<< HEAD
-  "l2update_last_page": 1200,
-  "l2awknupdate_last_page": 1200
-=======
   "l2update_last_page": 0,
   "l2awknupdate": [
     "681a8c6371889956d8d8cda1",
@@ -48,5 +44,4 @@
     "6a289af0b1a52047c72addf8"
   ],
   "l2awknupdate_last_page": 0
->>>>>>> 88ac0c7 (crawler: hex 아티클 ID 파싱 버그 수정)
 }
