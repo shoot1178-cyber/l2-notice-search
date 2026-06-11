@@ -294,8 +294,9 @@ async def fetch_content(page, url: str) -> str:
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
     """
-    Phase 1) p1~last_page: 신규 공지 확인 (이미 수집한 ID 건너뜀)
-    Phase 2) last_page+1~끝: 이어서 수집, last_page 갱신
+    last_page+1부터 끝까지 수집. 이미 수집한 ID는 건너뜀.
+    빈 페이지(전체 완료) 시 last_page를 0으로 리셋 → 다음 실행 때 p1부터 재시작.
+    타임아웃으로 중단 시 last_page 유지 → 다음 실행 때 이어서.
     200페이지마다 push.
     """
     name = board["name"]
@@ -308,7 +309,7 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
     print(f"{'='*55}")
 
     known_ids: set = set(crawled_ids.get(board_id, []))
-    last_page: int = crawled_ids.get(last_page_key, 0)
+    start_page = crawled_ids.get(last_page_key, 0) + 1
     page = await context.new_page()
     await page.add_init_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
@@ -318,65 +319,44 @@ async def crawl_board(context, board: dict, crawled_ids: dict) -> int:
     total_new = 0
     pages_since_push = 0
 
-    async def fetch_and_write(articles: list[dict], page_num: int) -> None:
-        nonlocal total_new
-        out_file.parent.mkdir(exist_ok=True)
-        with open(out_file, "a", encoding="utf-8") as f:
-            for idx, art in enumerate(articles, 1):
-                print(f"  [{name}] p{page_num} {idx}/{len(articles)} — {art['title'][:45]}...")
-                content = await fetch_content(page, art["url"])
-                date = art["date"] or extract_date_from_text(content) or extract_date_from_title(art["title"])
-                f.write(format_notice(art["title"], date, classify_server(name, art["title"]), art["url"], content))
-                crawled_ids.setdefault(board_id, [])
-                if art["article_id"] not in crawled_ids[board_id]:
-                    crawled_ids[board_id].append(art["article_id"])
-                known_ids.add(art["article_id"])
-                total_new += 1
-                await delay(1.0, 2.0)
-
     try:
-        # ── Phase 1: p1~last_page 신규 공지 확인 ─────────────────────────────
-        if last_page > 0:
-            print(f"\n  [{name}] Phase 1: p1~p{last_page} 신규 공지 확인")
-            for page_num in range(1, last_page + 1):
-                articles, has_known = await collect_one_page(
-                    page, board["url"], board_id, page_num, known_ids
-                )
-                if not articles and not has_known:
-                    print(f"  🏁 p{page_num} 빈 페이지 — Phase 1 종료")
-                    break
-                if articles:
-                    print(f"  [{name}] p{page_num} — {len(articles)}건 신규 공지")
-                    await fetch_and_write(articles, page_num)
-                    save_crawled_ids(crawled_ids)
-                    print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
-                pages_since_push += 1
-                if pages_since_push >= PUSH_INTERVAL:
-                    git_push_checkpoint(f"crawler: [{name}] p{page_num} 완료 (총 {total_new}건)")
-                    pages_since_push = 0
-                await delay(1.0, 2.0)
-
-        # ── Phase 2: last_page+1부터 끝까지 ──────────────────────────────────
-        start = last_page + 1
-        print(f"\n  [{name}] Phase 2: p{start}~ 이어서 수집")
-        page_num = start
+        print(f"\n  [{name}] p{start_page}부터 수집 시작")
+        page_num = start_page
         while True:
             articles, has_known = await collect_one_page(
                 page, board["url"], board_id, page_num, known_ids
             )
+
             if not articles and not has_known:
-                print("  🏁 빈 페이지 — 게시판 끝")
+                print("  🏁 빈 페이지 — 전체 완료, last_page 리셋")
+                crawled_ids[last_page_key] = 0
+                save_crawled_ids(crawled_ids)
                 break
+
             if articles:
                 print(f"  [{name}] p{page_num} — {len(articles)}건 본문 수집")
-                await fetch_and_write(articles, page_num)
+                out_file.parent.mkdir(exist_ok=True)
+                with open(out_file, "a", encoding="utf-8") as f:
+                    for idx, art in enumerate(articles, 1):
+                        print(f"  [{name}] p{page_num} {idx}/{len(articles)} — {art['title'][:45]}...")
+                        content = await fetch_content(page, art["url"])
+                        date = art["date"] or extract_date_from_text(content) or extract_date_from_title(art["title"])
+                        f.write(format_notice(art["title"], date, classify_server(name, art["title"]), art["url"], content))
+                        crawled_ids.setdefault(board_id, [])
+                        if art["article_id"] not in crawled_ids[board_id]:
+                            crawled_ids[board_id].append(art["article_id"])
+                        known_ids.add(art["article_id"])
+                        total_new += 1
+                        await delay(1.0, 2.0)
                 print(f"  [{name}] 💾 p{page_num} 저장 완료 (총 {total_new}건)")
+
             crawled_ids[last_page_key] = page_num
             save_crawled_ids(crawled_ids)
             pages_since_push += 1
             if pages_since_push >= PUSH_INTERVAL:
                 git_push_checkpoint(f"crawler: [{name}] p{page_num} 완료 (총 {total_new}건)")
                 pages_since_push = 0
+
             page_num += 1
             await delay(1.0, 2.0)
 
