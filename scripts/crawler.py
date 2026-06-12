@@ -3,9 +3,9 @@
 리니지2 공식 홈페이지 공지 크롤러 (REST API 직접 호출 방식)
 - Playwright 불필요: api-community.plaync.com REST API 사용
 - 게시판 페이지네이션은 ?page=N 아닌 cursor 기반 (previousArticleId)
-- 공지 목록: GET /lin2/board/{boardId}/article (첫 배치)
-             GET /lin2/board/{boardId}/article/search/moreArticle (이후 배치)
-- 공지 본문: GET /lin2/board/{boardId}/article/{articleId}
+- 본서버:   GET /lin2/board/{boardId}/article (첫 배치)
+            GET /lin2/board/{boardId}/article/search/moreArticle (이후 배치)
+- 각성서버: 동일하나 game prefix가 lin2_awkn (HTML boardConfig.apiPath에서 확인)
 """
 
 import json
@@ -23,7 +23,7 @@ sys.stdout.reconfigure(errors='replace')
 
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
-API_BASE = "https://api-community.plaync.com/lin2/"
+_API_COMMUNITY = "https://api-community.plaync.com/"
 BOARD_URL_PATTERN = "https://lineage2.plaync.com/board/{board_alias}/view?articleId={article_id}"
 
 NOTICES_DIR = Path("notices")
@@ -32,11 +32,13 @@ BOARDS = [
     {
         "name":        "본서버",
         "board_id":    "l2update",
+        "api_base":    _API_COMMUNITY + "lin2/",
         "output_file": NOTICES_DIR / "l2_notices_본서버.txt",
     },
     {
         "name":        "각성서버",
         "board_id":    "l2awknupdate",
+        "api_base":    _API_COMMUNITY + "lin2_awkn/",   # lin2_awkn: 각성서버 게임 prefix
         "output_file": NOTICES_DIR / "l2_notices_각성서버.txt",
     },
 ]
@@ -164,12 +166,12 @@ def parse_date(timestamps: dict) -> str:
 
 
 # ── API 래퍼 ──────────────────────────────────────────────────────────────────
-def fetch_article_list(board_id: str, cursor: str | None) -> dict:
+def fetch_article_list(api_base: str, board_id: str, cursor: str | None) -> dict:
     """기사 목록 한 배치 가져오기 (cursor=None이면 최신부터)."""
     if cursor is None:
-        return _get(f"{API_BASE}board/{board_id}/article")
+        return _get(f"{api_base}board/{board_id}/article")
     return _get(
-        f"{API_BASE}board/{board_id}/article/search/moreArticle",
+        f"{api_base}board/{board_id}/article/search/moreArticle",
         params={
             "moreDirection": "BEFORE",
             "previousArticleId": cursor,
@@ -178,10 +180,10 @@ def fetch_article_list(board_id: str, cursor: str | None) -> dict:
     )
 
 
-def fetch_article_content(board_id: str, article_id: str) -> str:
+def fetch_article_content(api_base: str, board_id: str, article_id: str) -> str:
     """기사 본문 HTML을 텍스트로 변환하여 반환."""
     try:
-        data = _get(f"{API_BASE}board/{board_id}/article/{article_id}")
+        data = _get(f"{api_base}board/{board_id}/article/{article_id}")
         html = data.get("article", {}).get("content", {}).get("content", "")
         return html_to_text(html) if html else "[본문 없음]"
     except Exception as e:
@@ -191,6 +193,7 @@ def fetch_article_content(board_id: str, article_id: str) -> str:
 # ── 공통 저장 헬퍼 ───────────────────────────────────────────────────────────
 def _save_articles(
     items: list,
+    api_base: str,
     board_id: str,
     board_name: str,
     out_file,
@@ -212,7 +215,7 @@ def _save_articles(
             server = classify_server(board_name, title)
 
             print(f"    [{idx}/{len(new_articles)}] {title[:50]}")
-            content = fetch_article_content(board_id, article_id)
+            content = fetch_article_content(api_base, board_id, article_id)
             f.write(format_notice(title, date, server, url, content))
 
             crawled_ids.setdefault(board_id, [])
@@ -241,6 +244,7 @@ def crawl_board(board: dict, crawled_ids: dict) -> int:
     """
     name = board["name"]
     board_id = board["board_id"]
+    api_base = board["api_base"]
     out_file = board["output_file"]
     cursor_key = f"{board_id}_cursor"
     complete_key = f"{board_id}_complete"
@@ -266,7 +270,7 @@ def crawl_board(board: dict, crawled_ids: dict) -> int:
 
     while p1_consecutive_known < MAX_CONSECUTIVE_KNOWN:
         try:
-            data = fetch_article_list(board_id, p1_cursor)
+            data = fetch_article_list(api_base, board_id, p1_cursor)
         except Exception as e:
             print(f"  [오류] 목록 로드 실패: {e}")
             break
@@ -282,7 +286,7 @@ def crawl_board(board: dict, crawled_ids: dict) -> int:
             save_crawled_ids(crawled_ids)
             break
 
-        saved = _save_articles(items, board_id, name, out_file, known_ids, crawled_ids)
+        saved = _save_articles(items, api_base, board_id, name, out_file, known_ids, crawled_ids)
         print(f"  Phase 1 cursor={str(p1_cursor)[:16] if p1_cursor else 'None'}: "
               f"{len(items)}건 / 신규 {saved}건")
 
@@ -317,7 +321,7 @@ def crawl_board(board: dict, crawled_ids: dict) -> int:
 
         while True:
             try:
-                data = fetch_article_list(board_id, cursor)
+                data = fetch_article_list(api_base, board_id, cursor)
             except Exception as e:
                 print(f"  [오류] 목록 로드 실패: {e}")
                 break
@@ -333,7 +337,7 @@ def crawl_board(board: dict, crawled_ids: dict) -> int:
                 save_crawled_ids(crawled_ids)
                 break
 
-            saved = _save_articles(items, board_id, name, out_file, known_ids, crawled_ids)
+            saved = _save_articles(items, api_base, board_id, name, out_file, known_ids, crawled_ids)
             print(f"  Phase 2 cursor={str(cursor)[:16] if cursor else 'None'}: "
                   f"{len(items)}건 / 신규 {saved}건 / hasMore={has_more}")
 
